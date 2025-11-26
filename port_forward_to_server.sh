@@ -6,7 +6,7 @@ set -euo pipefail
 # ================================
 
 usage() {
-  echo "Использование: wget -qO- gh address.sh | $0 --ip <IP> --remote-port <REMOTE_PORT> [--local-port <LOCAL_PORT>] [--protocol <tcp|udp|both>] [--enable-ip-forward] [--static] [--delete] [--dev]"
+  echo "Использование: wget -qO- https://raw.githubusercontent.com/likstanov/scripts/refs/heads/main/port_forward_to_server.sh | $0 --ip <IP> --remote-port <REMOTE_PORT> [--local-port <LOCAL_PORT>] [--protocol <tcp|udp|both>] [--enable-ip-forward] [--static] [--delete] [--dev]"
   echo "  --ip:                 IP назначения (например, 54.37.234.130)"
   echo "  --remote-port:        Удаленный порт (например, 51820)"
   echo "  --local-port:         Локальный порт (по умолчанию = удалённому)"
