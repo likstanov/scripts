@@ -18,14 +18,6 @@ usage() {
   exit 1
 }
 
-dev_info() {
-  echo -e "\n\033[32m=====================================\033[0m"
-  echo -e "\033[32m| Разработчик: Mikhail                |\033[0m"
-  echo -e "\033[32m| Связаться: https://t.me/likstanov|\033[0m"
-  echo -e "\033[32m=====================================\033[0m"
-  exit 0
-}
-
 require_root() {
   if [ "${EUID:-$(id -u)}" -ne 0 ]; then
     echo "Этот скрипт нужно запускать с правами root."
@@ -283,7 +275,6 @@ while [ "${1:-}" != "" ]; do
     --enable-ip-forward) ENABLE_IP_FORWARD=true;;
     --static) SAVE_STATIC_RULES=true;;
     --delete) DELETE_RULE=true;;
-    --dev) dev_info;;
     *) usage;;
   esac
   shift || true
