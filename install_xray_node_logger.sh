@@ -120,19 +120,32 @@ CONTAINER_NAME=$CONTAINER_NAME
 LOG_PATH_IN_CONTAINER=$LOG_PATH_IN_CONTAINER
 DATE=$(date '+%F %T')
 HOST=$(hostname 2>/dev/null || echo unknown)
+CHAT_ID=$CHAT_ID
+MESSAGE_THREAD_ID=${MESSAGE_THREAD_ID:-}
 EOF
 
   log "Отправляю тестовый файл в Telegram"
-  RESP="$(curl -sS --max-time 60 \
-    -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
-    -F "chat_id=${CHAT_ID}" \
-    -F "caption=Test from xray-log-bot installer" \
-    -F "document=@${TEST_FILE}" \
-    2>/dev/null || true)"
+
+  if [ -n "${MESSAGE_THREAD_ID:-}" ]; then
+    RESP="$(curl -sS --max-time 60 \
+      -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
+      -F "chat_id=${CHAT_ID}" \
+      -F "message_thread_id=${MESSAGE_THREAD_ID}" \
+      -F "caption=Test from xray-log-bot installer" \
+      -F "document=@${TEST_FILE}" \
+      2>/dev/null || true)"
+  else
+    RESP="$(curl -sS --max-time 60 \
+      -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
+      -F "chat_id=${CHAT_ID}" \
+      -F "caption=Test from xray-log-bot installer" \
+      -F "document=@${TEST_FILE}" \
+      2>/dev/null || true)"
+  fi
 
   rm -f "$TEST_FILE"
 
-  echo "$RESP" | grep '"ok":true' >/dev/null 2>&1 || fail "Не удалось отправить тестовый файл в Telegram. Проверь CHAT_ID и права бота на чат."
+  echo "$RESP" | grep '"ok":true' >/dev/null 2>&1 || fail "Не удалось отправить тестовый файл в Telegram. Проверь CHAT_ID, MESSAGE_THREAD_ID и права бота на чат."
 }
 
 write_main_script() {
@@ -253,6 +266,8 @@ send_ready_archives() {
   current_base="$(basename "$CURRENT_FILE" .csv)"
 
   local archive base resp rc
+  local -a curl_args
+
   for archive in "${archives[@]}"; do
     base="$(basename "$archive")"
 
@@ -262,12 +277,20 @@ send_ready_archives() {
 
     log "Sending to Telegram: $base"
 
-    resp="$(curl -sS --max-time 600 \
-      -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
-      -F "chat_id=${CHAT_ID}" \
-      -F "caption=${base}" \
-      -F "document=@${archive}" \
-      2>&1)"
+    curl_args=(
+      -sS
+      --max-time 600
+      -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument"
+      -F "chat_id=${CHAT_ID}"
+      -F "caption=${base}"
+      -F "document=@${archive}"
+    )
+
+    if [[ -n "${MESSAGE_THREAD_ID:-}" ]]; then
+      curl_args+=(-F "message_thread_id=${MESSAGE_THREAD_ID}")
+    fi
+
+    resp="$(curl "${curl_args[@]}" 2>&1)"
     rc=$?
 
     if [[ $rc -eq 0 && "$resp" == *'"ok":true'* ]]; then
@@ -393,6 +416,7 @@ LOG_PATH_IN_CONTAINER="$LOG_PATH_IN_CONTAINER"
 OUTPUT_DIR="$OUT_DIR"
 BOT_TOKEN="$BOT_TOKEN"
 CHAT_ID="$CHAT_ID"
+MESSAGE_THREAD_ID="$MESSAGE_THREAD_ID"
 ROTATE_SECONDS=$ROTATE_SECONDS
 RECONNECT_DELAY=2
 EOF
@@ -433,6 +457,21 @@ $APP_DIR
 - Конфиг: $CONF_PATH
 - Выходные файлы: $OUT_DIR
 - systemd service: $SERVICE_PATH
+
+Параметры конфига:
+- NODE_NAME
+- CONTAINER_NAME
+- LOG_PATH_IN_CONTAINER
+- OUTPUT_DIR
+- BOT_TOKEN
+- CHAT_ID
+- MESSAGE_THREAD_ID
+- ROTATE_SECONDS
+- RECONNECT_DELAY
+
+Логика отправки:
+- если MESSAGE_THREAD_ID пустой, отправка идёт в CHAT_ID
+- если MESSAGE_THREAD_ID задан, отправка идёт в соответствующий топик
 
 Что делает:
 - читает лог из docker-контейнера
@@ -501,6 +540,7 @@ main() {
 
   ask_secret BOT_TOKEN "Введите BOT_TOKEN"
   ask CHAT_ID "Введите CHAT_ID" ""
+  ask MESSAGE_THREAD_ID "Введите MESSAGE_THREAD_ID (если не нужен — оставь пустым)" ""
   ask NODE_NAME "Введите NODE_NAME" "node-fi-1"
   ask ROTATE_SECONDS "Введите ROTATE_SECONDS" "10800"
   ask CONTAINER_NAME "Введите CONTAINER_NAME" "remnanode"
