@@ -59,11 +59,11 @@ ask_secret() {
   VAR_NAME="$1"
   PROMPT="$2"
 
-  printf '%s' "$PROMPT: "
-  stty -echo
-  read INPUT_VALUE || true
-  stty echo
-  printf '\n'
+  printf '%s' "$PROMPT: " > /dev/tty
+  stty -echo < /dev/tty
+  read INPUT_VALUE < /dev/tty || true
+  stty echo < /dev/tty
+  printf '\n' > /dev/tty
 
   if [ -z "${INPUT_VALUE:-}" ]; then
     fail "$PROMPT не может быть пустым"
