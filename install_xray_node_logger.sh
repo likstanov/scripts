@@ -6,7 +6,8 @@ OUT_DIR="$APP_DIR/out"
 SCRIPT_PATH="$APP_DIR/xray-log-bot.sh"
 CONF_PATH="$APP_DIR/xray-log-bot.conf"
 README_PATH="$APP_DIR/README.md"
-SERVICE_PATH="/etc/systemd/system/xray-log-bot.service"
+SERVICE_NAME="xray-log-bot.service"
+SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 
 log() {
   printf '%s\n' "[install $(date '+%F %T')] $*"
@@ -20,6 +21,12 @@ fail() {
 need_root() {
   if [ "$(id -u)" -ne 0 ]; then
     fail "Запусти от root. Пример: curl -fsSL ... | sudo sh"
+  fi
+}
+
+need_tty() {
+  if [ ! -r /dev/tty ] || [ ! -w /dev/tty ]; then
+    fail "Не удалось получить доступ к /dev/tty для интерактивного ввода"
   fi
 }
 
@@ -41,12 +48,12 @@ ask() {
   DEFAULT_VALUE="$3"
 
   if [ -n "$DEFAULT_VALUE" ]; then
-    printf '%s' "$PROMPT [$DEFAULT_VALUE]: "
+    printf '%s' "$PROMPT [$DEFAULT_VALUE]: " > /dev/tty
   else
-    printf '%s' "$PROMPT: "
+    printf '%s' "$PROMPT: " > /dev/tty
   fi
 
-  read INPUT_VALUE || true
+  read INPUT_VALUE < /dev/tty || true
 
   if [ -z "${INPUT_VALUE:-}" ]; then
     INPUT_VALUE="$DEFAULT_VALUE"
@@ -70,6 +77,62 @@ ask_secret() {
   fi
 
   eval "$VAR_NAME=\$INPUT_VALUE"
+}
+
+check_systemctl() {
+  command -v systemctl >/dev/null 2>&1 || fail "systemd/systemctl не найден"
+}
+
+check_docker() {
+  command -v docker >/dev/null 2>&1 || fail "Docker не найден. Сначала установи Docker."
+  docker info >/dev/null 2>&1 || fail "Docker установлен, но daemon недоступен"
+}
+
+check_container_exists() {
+  if ! docker container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
+    fail "Контейнер '$CONTAINER_NAME' не найден"
+  fi
+}
+
+check_log_path_in_container() {
+  if ! docker exec "$CONTAINER_NAME" sh -lc "[ -f \"$LOG_PATH_IN_CONTAINER\" ]"; then
+    fail "Файл лога '$LOG_PATH_IN_CONTAINER' не найден внутри контейнера '$CONTAINER_NAME'"
+  fi
+
+  if ! docker exec "$CONTAINER_NAME" sh -lc "test -r \"$LOG_PATH_IN_CONTAINER\""; then
+    fail "Файл лога '$LOG_PATH_IN_CONTAINER' существует, но недоступен для чтения внутри контейнера '$CONTAINER_NAME'"
+  fi
+}
+
+check_telegram_api() {
+  log "Проверяю Telegram API getMe"
+  RESP="$(curl -fsS --max-time 20 "https://api.telegram.org/bot${BOT_TOKEN}/getMe" 2>/dev/null || true)"
+  echo "$RESP" | grep '"ok":true' >/dev/null 2>&1 || fail "Не удалось пройти проверку Telegram API getMe. Проверь BOT_TOKEN."
+}
+
+send_test_to_telegram() {
+  TEST_FILE="/tmp/xray_log_bot_test_$$.txt"
+  cat > "$TEST_FILE" <<EOF
+Xray Log Bot test message
+
+NODE_NAME=$NODE_NAME
+CONTAINER_NAME=$CONTAINER_NAME
+LOG_PATH_IN_CONTAINER=$LOG_PATH_IN_CONTAINER
+DATE=$(date '+%F %T')
+HOST=$(hostname 2>/dev/null || echo unknown)
+EOF
+
+  log "Отправляю тестовый файл в Telegram"
+  RESP="$(curl -sS --max-time 60 \
+    -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument" \
+    -F "chat_id=${CHAT_ID}" \
+    -F "caption=Test from xray-log-bot installer" \
+    -F "document=@${TEST_FILE}" \
+    2>/dev/null || true)"
+
+  rm -f "$TEST_FILE"
+
+  echo "$RESP" | grep '"ok":true' >/dev/null 2>&1 || fail "Не удалось отправить тестовый файл в Telegram. Проверь CHAT_ID и права бота на чат."
 }
 
 write_main_script() {
@@ -381,17 +444,17 @@ $APP_DIR
 - после успешной отправки удаляет ZIP
 
 Полезные команды:
-systemctl status xray-log-bot.service
-journalctl -u xray-log-bot.service -f
-systemctl restart xray-log-bot.service
-systemctl stop xray-log-bot.service
-systemctl disable xray-log-bot.service
+systemctl status $SERVICE_NAME
+journalctl -u $SERVICE_NAME -f
+systemctl restart $SERVICE_NAME
+systemctl stop $SERVICE_NAME
+systemctl disable $SERVICE_NAME
 
 Редактирование конфига:
 nano $CONF_PATH
 
 После изменения конфига:
-systemctl restart xray-log-bot.service
+systemctl restart $SERVICE_NAME
 
 Проверить файлы:
 ls -lah $OUT_DIR
@@ -402,8 +465,8 @@ EOF
 
 start_service() {
   systemctl daemon-reload
-  systemctl enable xray-log-bot.service
-  systemctl restart xray-log-bot.service
+  systemctl enable "$SERVICE_NAME"
+  systemctl restart "$SERVICE_NAME"
 }
 
 show_summary() {
@@ -417,28 +480,24 @@ show_summary() {
   printf '%s\n' "Папка выходных файлов: $OUT_DIR"
   printf '%s\n' ""
   printf '%s\n' "Полезные команды:"
-  printf '%s\n' "  systemctl status xray-log-bot.service"
-  printf '%s\n' "  journalctl -u xray-log-bot.service -f"
-  printf '%s\n' "  systemctl restart xray-log-bot.service"
+  printf '%s\n' "  systemctl status $SERVICE_NAME"
+  printf '%s\n' "  journalctl -u $SERVICE_NAME -f"
+  printf '%s\n' "  systemctl restart $SERVICE_NAME"
   printf '%s\n' "  ls -lah $OUT_DIR"
   printf '\n'
 }
 
 main() {
   need_root
+  need_tty
 
   install_pkg_if_missing bash bash
   install_pkg_if_missing curl curl
   install_pkg_if_missing zip zip
   install_pkg_if_missing flock util-linux
 
-  if ! command -v docker >/dev/null 2>&1; then
-    fail "Docker не найден. Сначала установи Docker."
-  fi
-
-  if ! command -v systemctl >/dev/null 2>&1; then
-    fail "systemd/systemctl не найден."
-  fi
+  check_systemctl
+  check_docker
 
   ask_secret BOT_TOKEN "Введите BOT_TOKEN"
   ask CHAT_ID "Введите CHAT_ID" ""
@@ -452,6 +511,11 @@ main() {
   [ -n "$ROTATE_SECONDS" ] || fail "ROTATE_SECONDS не может быть пустым"
   [ -n "$CONTAINER_NAME" ] || fail "CONTAINER_NAME не может быть пустым"
   [ -n "$LOG_PATH_IN_CONTAINER" ] || fail "LOG_PATH_IN_CONTAINER не может быть пустым"
+
+  check_telegram_api
+  check_container_exists
+  check_log_path_in_container
+  send_test_to_telegram
 
   mkdir -p "$APP_DIR"
   mkdir -p "$OUT_DIR"
