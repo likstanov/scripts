@@ -53,9 +53,10 @@ ask() {
     printf '%s' "$PROMPT: " > /dev/tty
   fi
 
-  read INPUT_VALUE < /dev/tty || true
+  IFS= read -r INPUT_VALUE < /dev/tty || true
+  INPUT_VALUE=$(printf '%s' "$INPUT_VALUE" | tr -d '\r')
 
-  if [ -z "${INPUT_VALUE:-}" ]; then
+  if [ -z "$INPUT_VALUE" ]; then
     INPUT_VALUE="$DEFAULT_VALUE"
   fi
 
@@ -68,11 +69,13 @@ ask_secret() {
 
   printf '%s' "$PROMPT: " > /dev/tty
   stty -echo < /dev/tty
-  read INPUT_VALUE < /dev/tty || true
+  IFS= read -r INPUT_VALUE < /dev/tty || true
   stty echo < /dev/tty
   printf '\n' > /dev/tty
 
-  if [ -z "${INPUT_VALUE:-}" ]; then
+  INPUT_VALUE=$(printf '%s' "$INPUT_VALUE" | tr -d '\r')
+
+  if [ -z "$INPUT_VALUE" ]; then
     fail "$PROMPT не может быть пустым"
   fi
 
